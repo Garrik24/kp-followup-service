@@ -2,5 +2,6 @@
 builder = "DOCKERFILE"
 
 [deploy]
-# Cron: будни 10:00 и 15:00 МСК (07:00 и 12:00 UTC)
-cronSchedule = "0 7,12 * * 1-5"
+healthcheckPath = "/"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

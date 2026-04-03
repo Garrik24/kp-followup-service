@@ -1,2 +1,2 @@
-# Нет внешних зависимостей — используем только stdlib
-# (urllib, json, logging, datetime)
+python-telegram-bot>=21.0
+apscheduler>=3.10
