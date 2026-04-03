@@ -355,8 +355,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Cron-проверка ────────────────────────────────────────────────────────────
 
-async def check_deals(context: ContextTypes.DEFAULT_TYPE):
-    """Проверить сделки и отправить карточки в Telegram."""
+async def check_deals(context):
+    """Проверить сделки и отправить карточки в Telegram.
+    context может быть ContextTypes.DEFAULT_TYPE (из команды) или Application (из cron).
+    """
     now_msk = datetime.now(MSK)
     log.info(f"🔍 Проверка сделок: {now_msk.strftime('%Y-%m-%d %H:%M')} МСК")
 
@@ -460,11 +462,14 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_handler))
 
     # Cron: будни 10:00 и 15:00 МСК
+    async def cron_check():
+        """Обёртка для cron — передаёт app как context."""
+        await check_deals(app)
+
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
     scheduler.add_job(
-        check_deals,
+        cron_check,
         CronTrigger(hour="10,15", minute="0", day_of_week="mon-fri"),
-        args=[app],
         name="kp_followup_check",
     )
     scheduler.start()
