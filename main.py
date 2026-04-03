@@ -469,19 +469,21 @@ def main():
     # Кнопки
     app.add_handler(CallbackQueryHandler(callback_handler))
 
-    # Cron: будни 10:00 и 15:00 МСК
-    async def cron_check():
-        """Обёртка для cron — передаёт bot напрямую."""
-        await check_deals(app.bot)
+    # post_init: запускаем scheduler когда event loop уже работает
+    async def post_init(application):
+        async def cron_check():
+            await check_deals(application.bot)
 
-    scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
-    scheduler.add_job(
-        cron_check,
-        CronTrigger(hour="10,15", minute="0", day_of_week="mon-fri"),
-        name="kp_followup_check",
-    )
-    scheduler.start()
-    log.info("⏰ Cron запущен: будни 10:00 и 15:00 МСК")
+        scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
+        scheduler.add_job(
+            cron_check,
+            CronTrigger(hour="10,15", minute="0", day_of_week="mon-fri"),
+            name="kp_followup_check",
+        )
+        scheduler.start()
+        log.info("⏰ Cron запущен: будни 10:00 и 15:00 МСК")
+
+    app.post_init = post_init
 
     # Webhook или polling
     if RAILWAY_PUBLIC_DOMAIN:
