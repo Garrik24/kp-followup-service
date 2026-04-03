@@ -10,6 +10,8 @@ KP Auto Follow-Up Service
 Работает на Railway по cron: будни 10:00 и 15:00 МСК.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
