@@ -1,0 +1,2 @@
+# Нет внешних зависимостей — используем только stdlib
+# (urllib, json, logging, datetime)
