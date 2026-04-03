@@ -355,10 +355,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Cron-проверка ────────────────────────────────────────────────────────────
 
-async def check_deals(context):
+async def check_deals(bot_or_context):
     """Проверить сделки и отправить карточки в Telegram.
-    context может быть ContextTypes.DEFAULT_TYPE (из команды) или Application (из cron).
+    bot_or_context: telegram.Bot (из cron) или ContextTypes.DEFAULT_TYPE (из команды).
     """
+    from telegram import Bot
+    if isinstance(bot_or_context, Bot):
+        bot = bot_or_context
+    elif hasattr(bot_or_context, "bot"):
+        bot = bot_or_context.bot
+    else:
+        bot = bot_or_context
+
     now_msk = datetime.now(MSK)
     log.info(f"🔍 Проверка сделок: {now_msk.strftime('%Y-%m-%d %H:%M')} МСК")
 
@@ -431,7 +439,7 @@ async def check_deals(context):
 
         keyboard = InlineKeyboardMarkup(buttons)
 
-        await context.bot.send_message(
+        await bot.send_message(
             chat_id=TELEGRAM_CHAT_ID,
             text=text,
             parse_mode="HTML",
@@ -463,8 +471,8 @@ def main():
 
     # Cron: будни 10:00 и 15:00 МСК
     async def cron_check():
-        """Обёртка для cron — передаёт app как context."""
-        await check_deals(app)
+        """Обёртка для cron — передаёт bot напрямую."""
+        await check_deals(app.bot)
 
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
     scheduler.add_job(
