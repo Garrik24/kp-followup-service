@@ -205,7 +205,7 @@ def analyze_response_with_claude(deal_name: str, client_name: str,
 }}"""
 
     payload = json.dumps({
-        "model": "claude-sonnet-4-20250514",
+        "model": "claude-sonnet-5",
         "max_tokens": 500,
         "messages": [{"role": "user", "content": prompt}],
     }).encode()
