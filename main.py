@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 import urllib.parse
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 import gemini_fallback
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -46,6 +47,7 @@ RAILWAY_PUBLIC_DOMAIN = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
 PIPELINE_ID = int(os.environ.get("PIPELINE_ID", "3887935"))
 STATUS_ID = int(os.environ.get("STATUS_ID", "37270534"))
 MSK = timezone(timedelta(hours=3))
+MSK_ZONE = ZoneInfo("Europe/Moscow")
 
 FOLLOWUP_TEMPLATES = {
     1: "Добрый день!<br><br>Направляли вам коммерческое предложение по теме «{deal_name}». Хотели уточнить, успели ли ознакомиться?",
@@ -658,6 +660,25 @@ async def run_all_checks(bot):
 
 # ── Запуск ───────────────────────────────────────────────────────────────────
 
+def build_scheduler(bot) -> AsyncIOScheduler:
+    """Планировщик проверок: будни 10:00 и 15:00 по Москве.
+
+    Корутину передаём в add_job как есть: AsyncIOScheduler сам запустит её в
+    цикле событий. Обычная lambda с asyncio.ensure_future выполнялась в потоке
+    без цикла и падала с «no current event loop» — проверки не запускались.
+    Часовой пояс задаём самому триггеру: без него CronTrigger берёт системный
+    (UTC в контейнере), и проверки шли в 13:00 и 18:00 МСК.
+    """
+    scheduler = AsyncIOScheduler(timezone=MSK_ZONE)
+    scheduler.add_job(
+        run_all_checks,
+        CronTrigger(hour="10,15", minute="0", day_of_week="mon-fri", timezone=MSK_ZONE),
+        args=[bot],
+        name="kp_check",
+    )
+    return scheduler
+
+
 def main():
     log.info("🚀 Запуск KP Follow-Up Bot")
 
@@ -668,12 +689,7 @@ def main():
 
     # Запускаем post_init для cron
     async def post_init(application: Application):
-        scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
-        scheduler.add_job(
-            lambda: asyncio.ensure_future(run_all_checks(application.bot)),
-            CronTrigger(hour="10,15", minute="0", day_of_week="mon-fri"),
-            name="kp_check",
-        )
+        scheduler = build_scheduler(application.bot)
         scheduler.start()
         log.info("⏰ Cron: будни 10:00, 15:00 МСК")
 

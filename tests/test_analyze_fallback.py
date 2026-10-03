@@ -4,7 +4,11 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 for name in ("telegram", "telegram.ext", "apscheduler", "apscheduler.schedulers", "apscheduler.schedulers.asyncio",
              "apscheduler.triggers", "apscheduler.triggers.cron"):
-    sys.modules.setdefault(name, mock.MagicMock())
+    # Заглушки только если настоящего пакета нет (иначе ломаем тесты планировщика).
+    try:
+        __import__(name)
+    except ImportError:
+        sys.modules[name] = mock.MagicMock()
 
 import gemini_fallback  # noqa: E402
 import main  # noqa: E402
