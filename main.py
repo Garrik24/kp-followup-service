@@ -14,10 +14,12 @@ import json
 import logging
 import os
 import re
+import urllib.error
 import urllib.request
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 
+import gemini_fallback
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -171,16 +173,17 @@ def analyze_response_with_claude(deal_name: str, client_name: str,
         "action": "wait|follow_up|close"
       }
     """
-    if not ANTHROPIC_API_KEY:
+    default = {
+        "summary": response_text[:200],
+        "sentiment": "neutral",
+        "has_date": False,
+        "decision_date": None,
+        "days_to_wait": 3,
+        "action": "wait",
+    }
+    if not ANTHROPIC_API_KEY and not gemini_fallback.enabled():
         log.warning("ANTHROPIC_API_KEY не настроен — пропуск AI-анализа")
-        return {
-            "summary": response_text[:200],
-            "sentiment": "neutral",
-            "has_date": False,
-            "decision_date": None,
-            "days_to_wait": 3,
-            "action": "wait",
-        }
+        return default
 
     today = datetime.now(MSK).strftime("%Y-%m-%d")
     prompt = f"""Ты помощник менеджера по продажам. Проанализируй ответ клиента на коммерческое предложение.
@@ -204,38 +207,56 @@ def analyze_response_with_claude(deal_name: str, client_name: str,
   "action": "wait" (ждать решения) или "follow_up" (нужен дожим) или "close" (клиент отказал)
 }}"""
 
-    payload = json.dumps({
-        "model": "claude-sonnet-5",
-        "max_tokens": 500,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode()
+    text = None
+    outage = not ANTHROPIC_API_KEY  # ключа Claude нет — сразу запасной канал
+    if ANTHROPIC_API_KEY:
+        payload = json.dumps({
+            "model": "claude-sonnet-5",
+            "max_tokens": 500,
+            "messages": [{"role": "user", "content": prompt}],
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=payload,
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read().decode())
+            # Первым блоком может прийти размышление — берём только текст.
+            text = "".join(
+                b.get("text", "") for b in result.get("content", []) if b.get("type") == "text"
+            )
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode(errors="replace")[:300]
+            log.error(f"Claude API error: {e.code} {detail}")
+            outage = gemini_fallback.is_outage(e.code, detail)
+        except Exception as e:  # сеть, таймаут, кривой ответ
+            log.error(f"Claude API error: {e}")
+            outage = isinstance(e, (urllib.error.URLError, TimeoutError, OSError))
 
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload,
-        headers={
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-        },
-    )
+    # Запасной канал — только при сбое самого сервиса Anthropic.
+    if text is None and outage and gemini_fallback.enabled():
+        try:
+            log.warning("Claude недоступен — ответ клиента разбирает Gemini")
+            text = gemini_fallback.generate("", prompt, max_tokens=500, json_mode=True)
+        except Exception as e:
+            log.error(f"Gemini fallback error: {e}")
 
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read().decode())
-            text = result.get("content", [{}])[0].get("text", "")
-            # Извлекаем JSON из ответа
-            match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
-            if match:
-                return json.loads(match.group())
-            return {"summary": text[:200], "sentiment": "neutral",
-                    "has_date": False, "decision_date": None,
-                    "days_to_wait": 3, "action": "wait"}
-    except Exception as e:
-        log.error(f"Claude API error: {e}")
-        return {"summary": response_text[:200], "sentiment": "neutral",
-                "has_date": False, "decision_date": None,
-                "days_to_wait": 3, "action": "wait"}
+    if text is None:
+        return default
+    # Извлекаем JSON из ответа
+    match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            pass
+    return {**default, "summary": text[:200]}
 
 
 # ── Mail MCP ─────────────────────────────────────────────────────────────────
